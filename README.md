@@ -42,30 +42,25 @@ This is a runnable AI investment analyst product that:
 
 - See `runbook.md` for production operations, monitoring, incident response, and maintenance checklist.
 
-## Cloud deploy (Render, fastest path)
+## Cloud deploy (Render — recommended)
 
-1. Push this folder to a GitHub repo.
-2. In Render, click **New +** -> **Blueprint**.
-3. Select your repo. Render will detect `render.yaml`.
-4. Set these required env vars in Render:
-   - `SEC_USER_AGENT` (example: `AIInvestmentAnalyst/0.1 your-email@example.com`)
-   - `AUTH_PASSWORD` (your own strong password)
-5. Deploy.
+Railway Metal builders have had intermittent “scheduled but never runs” failures. **Render + Docker** is the supported path.
 
-After deploy, open:
-- `https://<your-render-domain>/login`
+**Full guide:** see [`DEPLOY_RENDER.md`](DEPLOY_RENDER.md)
 
-Use:
-- username: `admin`
-- password: your `AUTH_PASSWORD`
+1. Push `main` to GitHub.
+2. [Render Dashboard](https://dashboard.render.com/) → **New +** → **Blueprint** → connect repo.
+3. Render reads `render.yaml` (Dockerfile + Postgres).
+4. When prompted, set:
+   - `SEC_USER_AGENT` (e.g. `MERIDIAN/1.0 your-email@example.com`)
+   - `AUTH_PASSWORD` (strong password)
+   - `FINNHUB_API_KEY` (recommended — [free](https://finnhub.io/register))
+5. Deploy (~$14/mo Starter web + DB).
 
-## Cloud deploy (Railway)
+After deploy:
+- `https://<your-render-domain>/health` — liveness
+- `https://<your-render-domain>/login` — username `admin`
 
-1. Connect the GitHub repo and deploy. Either:
-   - Set the service **Root Directory** to `backend` and start with `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, **or**
-   - Keep **repo root** as the service root: `railway.toml` uses **RAILPACK** (Railway’s current builder; do not use `nixpacks`). A root **`requirements.txt`** delegates to `backend` via `-r backend/requirements.txt`; start command `cd backend && uvicorn …`.
-2. Add a **Postgres** plugin and set `DATABASE_URL` on the web service (SQLAlchemy style `postgresql+psycopg2://…` is fine).
-3. Set `SEC_USER_AGENT`, `AUTH_PASSWORD`, and **`FINNHUB_API_KEY`** (quotes often fail from cloud IPs without it).
-4. After deploy, open `https://<your-railway-url>/health/quote?ticker=AAPL` (no login) to see which quote provider succeeded.
+## Cloud deploy (Railway — optional)
 
-For a ready-made message to paste into Railway’s AI assistant, see **`RAILWAY_AI_AGENT_PROMPT.txt`** in the repo root.
+Only if Railway builders are healthy. Use root `Dockerfile` builder (see `railway.json`). If builds stall on Metal with zero execution, migrate to Render above.
