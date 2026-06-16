@@ -1,2 +1,14 @@
-# Railpack/Railway installs from repo root; delegate to the FastAPI app deps.
--r backend/requirements.txt
+# Installed from repo root (Railway RAILPACK). Keep in sync with backend/requirements.txt.
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+psycopg2-binary
+alembic
+requests
+httpx
+yfinance>=0.2.40
+apscheduler
+python-multipart

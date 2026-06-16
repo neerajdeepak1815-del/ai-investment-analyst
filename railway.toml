@@ -1,10 +1,13 @@
 # Railway config-as-code (repo root).
-# Builder must be RAILPACK or DOCKERFILE — "nixpacks" is invalid and breaks the build.
-# Root requirements.txt includes backend via: -r backend/requirements.txt
+# Prefer DOCKERFILE builder — most reliable for monorepo + Postgres (psycopg2).
+# Alternative: set service Root Directory = backend, builder = RAILPACK, start:
+#   uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
 [build]
-builder = "RAILPACK"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 restartPolicyType = "ON_FAILURE"
+healthcheckPath = "/health"
+healthcheckTimeout = 120

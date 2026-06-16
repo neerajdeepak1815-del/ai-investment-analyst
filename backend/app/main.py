@@ -237,7 +237,7 @@ def _is_auth_path(path: str) -> bool:
     if path in open_paths:
         return True
     # Liveness / quote diagnostics (no secrets; helps verify Railway env keys and outbound HTTP).
-    if path.startswith("/health/"):
+    if path.startswith("/health"):
         return True
     if path.startswith("/docs") or path.startswith("/openapi") or path.startswith("/redoc"):
         return False
@@ -919,6 +919,11 @@ def api_valuation_standalone(ticker: str, response: Response, db: Session = Depe
         "valuation": v_bundle,
         "live_quote": live_q,
     }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/health/freshness")

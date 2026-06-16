@@ -1,5 +1,17 @@
-from pydantic import AliasChoices, Field
+from typing import Any
+
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_database_url(url: str) -> str:
+    """Railway/Heroku often provide postgres:// — SQLAlchemy needs postgresql+psycopg2://."""
+    u = (url or "").strip()
+    if u.startswith("postgres://"):
+        return "postgresql+psycopg2://" + u[len("postgres://") :]
+    if u.startswith("postgresql://") and not u.startswith("postgresql+"):
+        return "postgresql+psycopg2://" + u[len("postgresql://") :]
+    return u
 
 
 class Settings(BaseSettings):
@@ -62,6 +74,13 @@ class Settings(BaseSettings):
         ),
         validation_alias=AliasChoices("CRITICAL_NEWS_ALLOWLIST", "critical_news_allowlist"),
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return _normalize_database_url(v)
+        return v
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
