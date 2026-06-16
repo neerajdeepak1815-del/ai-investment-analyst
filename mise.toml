@@ -1,0 +1,6 @@
+# Railway Railpack reads this for Python version (use minor, not patch).
+[tools]
+python = "3.11"
+
+[settings.python]
+# If mise still fails, set MISE_PYTHON_COMPILE=1 on the Railway service.
