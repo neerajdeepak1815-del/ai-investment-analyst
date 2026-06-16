@@ -1,7 +1,9 @@
 # Railway config-as-code (repo root).
-# Prefer DOCKERFILE builder — most reliable for monorepo + Postgres (psycopg2).
-# Alternative: set service Root Directory = backend, builder = RAILPACK, start:
-#   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+#
+# RECOMMENDED: Dockerfile builder (no mise/python step).
+# In Railway UI: Service → Settings → Build → Builder → Dockerfile
+#
+# FALLBACK: Railpack — requires mise.toml / .python-version (3.11.11).
 
 [build]
 builder = "DOCKERFILE"
