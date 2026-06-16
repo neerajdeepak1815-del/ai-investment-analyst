@@ -1,7 +1,0 @@
-# Railpack reads this when builder = RAILPACK (not Dockerfile).
-# Pin a patch version with a known precompiled binary on Railway's builders.
-[tools]
-python = "3.11.11"
-
-[settings.python]
-# Set MISE_PYTHON_COMPILE=1 in Railway only if this patch ever disappears.
