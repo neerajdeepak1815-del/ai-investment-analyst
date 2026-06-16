@@ -296,19 +296,37 @@ function rsiClass(rsi) {
   return "rsi-neutral";
 }
 
+function metaBanner(meta) {
+  if (!meta) return "";
+  const parts = [];
+  if (meta.scanned_at) parts.push("Scanned " + new Date(meta.scanned_at).toLocaleString());
+  if (meta.events_found != null) parts.push(meta.events_found + " events");
+  if (meta.passed_filter != null) parts.push(meta.passed_filter + " passed filter");
+  if (meta.note) parts.push(meta.note);
+  if (meta.methodology) parts.push(meta.methodology);
+  return '<p class="scan-meta" style="font-size:11px;color:var(--text-muted);margin:0 0 16px;line-height:1.6">' + esc(parts.join(" · ")) + "</p>";
+}
+
+function unwrapItems(payload) {
+  if (Array.isArray(payload)) return { items: payload, meta: null };
+  return { items: payload.items || [], meta: payload.meta || null };
+}
+
 /* ---- Momentum ---- */
 async function scanMomentum() {
   const el = document.getElementById("momentum-content");
-  el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning 50 stocks for momentum signals… this takes 30-60 seconds.</p>';
+  el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning 50 stocks for momentum signals… this may take 1–2 minutes on first load.</p>';
   showPanel("momentum");
   try {
     const res = await fetch("/api/opportunities/momentum", { cache: "no-store" });
-    const data = await res.json();
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const payload = await res.json();
+    const { items: data, meta } = unwrapItems(payload);
     if (!data || data.length === 0) {
-      el.innerHTML = '<p class="loading">No momentum candidates found (all stocks may have negative 1-month returns).</p>';
+      el.innerHTML = metaBanner(meta) + '<p class="loading">No momentum candidates found. Names with negative 1-month returns are excluded (momentum crash filter).</p>';
       return;
     }
-    let html = '<div class="momentum-grid">';
+    let html = metaBanner(meta) + '<div class="momentum-grid">';
     data.forEach((s, idx) => {
       const rsiCl = rsiClass(s.rsi);
       html += '<div class="mo-card">' +
@@ -319,7 +337,7 @@ async function scanMomentum() {
         '</div><div class="mo-score">' + esc(s.momentum_score) + '</div></div>' +
         '<div class="mo-metrics">' +
           '<div class="mo-metric"><span class="mo-metric-label">6M Return</span><span class="mo-metric-val ' + retClass(s.ret_6m) + '">' + fmtPct(s.ret_6m) + '</span></div>' +
-          '<div class="mo-metric"><span class="mo-metric-label">12M Return</span><span class="mo-metric-val ' + retClass(s.ret_12m) + '">' + fmtPct(s.ret_12m) + '</span></div>' +
+          '<div class="mo-metric"><span class="mo-metric-label">12M Return</span><span class="mo-metric-val ' + retClass(s.ret_12m) + '">' + fmtPct(s.ret_12m) + (s.ret_12m_partial ? "*" : "") + '</span></div>' +
           '<div class="mo-metric"><span class="mo-metric-label">1M Return</span><span class="mo-metric-val ' + retClass(s.ret_1m) + '">' + fmtPct(s.ret_1m) + '</span></div>' +
           '<div class="mo-metric"><span class="mo-metric-label">Price</span><span class="mo-metric-val">' + fmtUsd(s.current_price) + '</span></div>' +
           '<div class="mo-metric"><span class="mo-metric-label">52W High</span><span class="mo-metric-val">' + fmtUsd(s.high_52w) + '</span></div>' +
@@ -356,16 +374,18 @@ function addToSimulator(ticker, price) {
 /* ---- Earnings ---- */
 async function scanEarnings() {
   const el = document.getElementById("earnings-content");
-  el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning upcoming earnings… this takes 30-60 seconds.</p>';
+  el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning upcoming earnings via Yahoo Finance… this may take 1–2 minutes.</p>';
   showPanel("earnings");
   try {
     const res = await fetch("/api/opportunities/earnings", { cache: "no-store" });
-    const data = await res.json();
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const payload = await res.json();
+    const { items: data, meta } = unwrapItems(payload);
     if (!data || data.length === 0) {
-      el.innerHTML = '<p class="er-empty">No earnings events found in the next 14 days for the screening universe.</p>';
+      el.innerHTML = metaBanner(meta) + '<p class="er-empty">No earnings events found in the next 14 days for the 50-stock universe. This is normal when the earnings season is between reporting clusters — try again later in the week.</p>';
       return;
     }
-    let html = '<div style="overflow-x:auto"><table class="er-table"><thead><tr>' +
+    let html = metaBanner(meta) + '<div style="overflow-x:auto"><table class="er-table"><thead><tr>' +
       '<th>Stock</th><th>Earnings Date</th><th>Est EPS</th><th>Last 4 Qtrs</th>' +
       '<th>Target vs Price</th><th>MERIDIAN</th><th>Signal</th></tr></thead><tbody>';
     data.forEach(s => {
@@ -380,7 +400,10 @@ async function scanEarnings() {
       });
       html += '<tr><td><strong>' + esc(s.ticker) + '</strong><br><span style="font-size:11px;color:var(--text-muted)">' + esc(s.name) + '</span></td>' +
         '<td class="font-mono">' + esc(s.earnings_date) + '<br><span style="font-size:10px;color:var(--text-muted)">' + (s.days_until != null ? s.days_until + " days" : "") + '</span></td>' +
-        '<td class="font-mono">' + (s.eps_estimate != null ? "$" + s.eps_estimate.toFixed(2) : "—") + '</td>' +
+        '<td class="font-mono">' + (s.eps_estimate != null ? "$" + s.eps_estimate.toFixed(2) : "—") +
+          (s.eps_estimate_low != null && s.eps_estimate_high != null
+            ? '<br><span style="font-size:10px;color:var(--text-muted)">$' + s.eps_estimate_low.toFixed(2) + "–$" + s.eps_estimate_high.toFixed(2) + "</span>"
+            : "") + '</td>' +
         '<td><div class="er-surprise-row">' + (dots || '<span style="color:var(--text-muted);font-size:11px">No data</span>') + '</div>' +
           '<span style="font-size:10px;color:var(--text-muted)">' + s.beats + ' beats / ' + s.misses + ' misses</span></td>' +
         '<td class="font-mono">' +
@@ -412,18 +435,24 @@ async function scanRegime() {
   showPanel("regime");
   try {
     const res = await fetch("/api/opportunities/regime", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
+    const meta = d.meta || {};
     const regimeCl = d.regime === "bull" ? "bull regime-bull" : d.regime === "bear" ? "bear regime-bear" : "transition regime-transition";
     let html = '<div class="regime-hero ' + regimeCl + '">' +
       '<div class="regime-label">' + esc(d.regime_label) + '</div>' +
-      '<div class="regime-sub">Scanned ' + (d.scanned_at ? new Date(d.scanned_at).toLocaleString() : "just now") + '</div></div>';
+      '<div class="regime-sub">Scanned ' + (meta.scanned_at ? new Date(meta.scanned_at).toLocaleString() : "just now") + '</div></div>';
+
+    if (meta.warnings && meta.warnings.length) {
+      html += '<p class="scan-meta" style="font-size:11px;color:var(--amber);margin:12px 0">' + esc(meta.warnings.join(" ")) + "</p>";
+    }
 
     // Signal cards
     html += '<div class="signal-grid">';
-    // SPY vs 200MA
+    const spyColor = d.spy_above_200ma === true ? "var(--green)" : d.spy_above_200ma === false ? "var(--red)" : "var(--text-muted)";
+    const spyLabel = d.spy_above_200ma === true ? "Above ✓" : d.spy_above_200ma === false ? "Below ✗" : "—";
     html += '<div class="signal-card"><div class="signal-label">S&P 500 vs 200-Day MA</div>' +
-      '<div class="signal-value" style="color:' + (d.spy_above_200ma ? "var(--green)" : "var(--red)") + '">' +
-      (d.spy_above_200ma ? "Above ✓" : "Below ✗") + '</div>' +
+      '<div class="signal-value" style="color:' + spyColor + '">' + spyLabel + '</div>' +
       '<div class="signal-note">SPY ' + (d.spy_current != null ? "$" + d.spy_current : "—") +
       ' · MA200 ' + (d.spy_ma200 != null ? "$" + d.spy_ma200.toFixed(0) : "—") +
       ' · MA50 ' + (d.spy_ma50 != null ? "$" + d.spy_ma50.toFixed(0) : "—") + '</div></div>';
@@ -436,7 +465,12 @@ async function scanRegime() {
     const breadthColor = d.breadth_pct != null ? (d.breadth_pct > 60 ? "var(--green)" : d.breadth_pct < 40 ? "var(--red)" : "var(--amber)") : "var(--text-muted)";
     html += '<div class="signal-card"><div class="signal-label">Market Breadth</div>' +
       '<div class="signal-value" style="color:' + breadthColor + '">' + (d.breadth_pct != null ? d.breadth_pct + "%" : "—") + '</div>' +
-      '<div class="signal-note">Stocks above their 200-day MA</div></div>';
+      '<div class="signal-note">' + (d.breadth_pct != null ? d.breadth_above + "/" + d.breadth_total + " names" : "—") + ' above 200-day MA</div></div>';
+    // Credit
+    const creditColor = d.credit_spread_1m != null ? (d.credit_spread_1m > 0 ? "var(--green)" : d.credit_spread_1m < 0 ? "var(--red)" : "var(--text)") : "var(--text-muted)";
+    html += '<div class="signal-card"><div class="signal-label">Credit (XLF vs SPY, 1M)</div>' +
+      '<div class="signal-value" style="color:' + creditColor + '">' + (d.credit_spread_1m != null ? fmtPct(d.credit_spread_1m) : "—") + '</div>' +
+      '<div class="signal-note">' + esc(d.credit_label || "—") + '</div></div>';
     // Trend
     const trendColor = d.trend === "uptrend" ? "var(--green)" : d.trend === "downtrend" ? "var(--red)" : "var(--amber)";
     html += '<div class="signal-card"><div class="signal-label">Trend</div>' +
