@@ -98,15 +98,13 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, v: Any) -> Any:
-        env_url = _resolve_database_url_from_env()
-        raw = v
-        if isinstance(raw, str) and raw.strip():
-            raw = raw.strip()
-        elif env_url:
-            raw = env_url
-        else:
-            raw = ""
+        # Always run env resolution first — pydantic passes DATABASE_URL (private)
+        # as v, which would skip the public-URL swap for cross-region Railway.
+        resolved = _resolve_database_url_from_env()
+        if resolved:
+            return resolved
 
+        raw = v.strip() if isinstance(v, str) and v.strip() else ""
         if not raw:
             if _is_cloud_host():
                 raise ValueError(
@@ -115,14 +113,17 @@ class Settings(BaseSettings):
                     "If regions differ, also add DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}}."
                 )
             return "sqlite:///./investment_analyst.db"
-        return _normalize_database_url(str(raw))
+        return _normalize_database_url(raw)
 
     @model_validator(mode="after")
-    def require_postgres_on_cloud(self) -> "Settings":
+    def prefer_public_postgres_on_railway(self) -> "Settings":
+        public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+        if public and "railway.internal" in self.database_url:
+            self.database_url = _normalize_database_url(public)
         if _is_cloud_host() and self.database_url.startswith("sqlite"):
             raise ValueError(
                 "DATABASE_URL must use PostgreSQL on Railway/Render (SQLite is local-dev only). "
-                "Add PostgreSQL to the project and reference it: DATABASE_URL=${{Postgres.DATABASE_URL}}"
+                "Add PostgreSQL and reference DATABASE_URL=${{Postgres.DATABASE_URL}}"
             )
         return self
 
