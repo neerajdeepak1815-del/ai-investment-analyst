@@ -1,6 +1,6 @@
-# Railway config-as-code (repo root).
-# railway.json also sets builder = DOCKERFILE (UI may override either).
-# If builds still run Railpack/mise, railpack.json pins python 3.11 + start command.
+# Railway config — repo root deploy (PREFERRED)
+# Root Directory in Railway UI must be EMPTY for this file + root Dockerfile.
+# See RAILWAY_FIX.md if Root Directory is stuck on "backend".
 
 [build]
 builder = "DOCKERFILE"

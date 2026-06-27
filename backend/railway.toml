@@ -1,0 +1,11 @@
+# Used when Railway service Root Directory = backend (monorepo subfolder mode).
+# PREFERRED: leave Root Directory empty and use repo-root Dockerfile + railway.toml.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
