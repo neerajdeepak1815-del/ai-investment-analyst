@@ -21,16 +21,17 @@ def _normalize_database_url(url: str) -> str:
 
 
 def _resolve_database_url_from_env() -> str:
-    """Pick Railway Postgres URL: private first, public when cross-region."""
+    """Prefer private Railway Postgres; init_db falls back to public if unreachable."""
+    private_ref = os.getenv("DATABASE_PRIVATE_URL", "").strip()
     private = os.getenv("DATABASE_URL", "").strip()
     public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
-    if not private and public:
-        return _normalize_database_url(public)
-    if private and "railway.internal" in private and public:
-        # Cross-region: private hostname is unreachable from another region.
-        return _normalize_database_url(public)
+
+    if private_ref:
+        return _normalize_database_url(private_ref)
     if private:
         return _normalize_database_url(private)
+    if public:
+        return _normalize_database_url(public)
     return ""
 
 
@@ -116,10 +117,7 @@ class Settings(BaseSettings):
         return _normalize_database_url(raw)
 
     @model_validator(mode="after")
-    def prefer_public_postgres_on_railway(self) -> "Settings":
-        public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
-        if public and "railway.internal" in self.database_url:
-            self.database_url = _normalize_database_url(public)
+    def require_postgres_on_cloud(self) -> "Settings":
         if _is_cloud_host() and self.database_url.startswith("sqlite"):
             raise ValueError(
                 "DATABASE_URL must use PostgreSQL on Railway/Render (SQLite is local-dev only). "

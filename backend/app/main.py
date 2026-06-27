@@ -971,11 +971,11 @@ def setup_page():
         <p><strong>Auth enabled:</strong> {settings.auth_enabled}</p>
         <h3>Railway checklist</h3>
         <ol>
-          <li>Postgres + web service in the <strong>same region</strong></li>
-          <li>Root Directory = <strong>empty</strong> (or backend with backend/Dockerfile)</li>
-          <li>Builder = <strong>Dockerfile</strong> (not Railpack)</li>
-          <li><code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code></li>
-          <li>If cross-region: <code>DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}}</code></li>
+          <li><strong>Best fix:</strong> Meridian + Postgres in the <strong>same region</strong> (EU West)</li>
+          <li>Use <code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code> (private — stable)</li>
+          <li>Remove <code>DATABASE_PUBLIC_URL</code> if same region (public proxy is flaky)</li>
+          <li>If public proxy fails: redeploy the <strong>Postgres</strong> service (Settings → Redeploy)</li>
+          <li>Root Directory = empty · Builder = Dockerfile</li>
         </ol>
         <p><a href="/health/diagnostics" style="color:#C9A84C">JSON diagnostics</a> ·
         <a href="/login" style="color:#C9A84C">Login</a> ·
