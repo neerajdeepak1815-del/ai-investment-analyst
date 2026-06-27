@@ -9,7 +9,6 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Respo
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, text
 from sqlalchemy.orm import Session
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth_session import cookie_secure, create_session_token, verify_session_token
 
@@ -53,18 +52,6 @@ app = FastAPI(title="AI Investment Analyst API", version="0.1.0")
 logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 
-
-class _ProxyHeadersMiddleware(BaseHTTPMiddleware):
-    """Trust Railway/Render reverse proxy for scheme/host (HTTPS cookies & redirects)."""
-
-    async def dispatch(self, request: Request, call_next):
-        forwarded = request.headers.get("x-forwarded-proto")
-        if forwarded:
-            request.scope["scheme"] = forwarded.split(",")[0].strip()
-        return await call_next(request)
-
-
-app.add_middleware(_ProxyHeadersMiddleware)
 _dashboard_html_cache: Optional[str] = None
 _dashboard_html_mtime: Optional[float] = None
 _portfolio_html_cache: Optional[str] = None
@@ -276,9 +263,9 @@ async def auth_middleware(request: Request, call_next):
     # Browser HTML routes redirect; API routes must return 401 JSON (never 303), or fetch() follows
     # to /login HTML and JSON parsers leave dashboards without thesis/financials.
     browser_get_paths = frozenset({"/", "/dashboard", "/portfolio", "/opportunities"})
-    if request.method == "GET" and path in browser_get_paths:
+    if request.method in ("GET", "HEAD") and path in browser_get_paths:
         return RedirectResponse(url="/login", status_code=303)
-    raise HTTPException(status_code=401, detail="Authentication required.")
+    return JSONResponse({"detail": "Authentication required."}, status_code=401)
 
 
 @app.on_event("startup")
@@ -412,6 +399,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         samesite="lax",
         secure=cookie_secure(),
         max_age=60 * 60 * 24,
+        path="/",
     )
     return response
 
@@ -419,7 +407,7 @@ def login(username: str = Form(...), password: str = Form(...)):
 @app.get("/logout")
 def logout(request: Request):
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie(settings.auth_session_cookie)
+    response.delete_cookie(settings.auth_session_cookie, secure=cookie_secure(), samesite="lax")
     return response
 
 
@@ -936,6 +924,33 @@ def api_valuation_standalone(ticker: str, response: Response, db: Session = Depe
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/diagnostics")
+def health_diagnostics(db: Session = Depends(get_db)):
+    """Public diagnostics for Railway deploy troubleshooting (no secrets)."""
+    app_dir = Path(__file__).resolve().parent
+    html_files = ["meridian_dashboard.html", "opportunities_page.html", "portfolio_page.html"]
+    files = {name: (app_dir / name).is_file() for name in html_files}
+    universe = (app_dir.parent / "data" / "meridian_candidate_universe.json").is_file()
+    db_ok = False
+    db_error = None
+    try:
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        db_error = str(exc)
+    return {
+        "status": "ok",
+        "auth_enabled": settings.auth_enabled,
+        "auth_username": settings.auth_username,
+        "cookie_secure": cookie_secure(),
+        "database_ok": db_ok,
+        "database_error": db_error,
+        "html_files": files,
+        "universe_json": universe,
+        "railway": bool(__import__("os").getenv("RAILWAY_ENVIRONMENT")),
+    }
 
 
 @app.get("/health/ready")

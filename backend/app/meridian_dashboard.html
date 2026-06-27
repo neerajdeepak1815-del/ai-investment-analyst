@@ -3085,6 +3085,10 @@ async function loadRecs() {
     renderCriticalAlerts(Array.isArray(alertsRaw) ? alertsRaw : []);
 
     if (!lbRes.ok) {
+      if (lbRes.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
       const t1 = await lbRes.text().catch(() => "");
       target.innerHTML =
         '<div class="empty-card">Could not load leaderboard (' +

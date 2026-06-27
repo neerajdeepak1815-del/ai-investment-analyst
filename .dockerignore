@@ -4,7 +4,7 @@
 **/*.pyc
 **/.pytest_cache
 backend/investment_analyst.db
-backend/data
+backend/data/portfolio.json
 *.md
 !README.md
 .cursor
