@@ -20,6 +20,20 @@ def _normalize_database_url(url: str) -> str:
     return u
 
 
+def _resolve_database_url_from_env() -> str:
+    """Pick Railway Postgres URL: private first, public when cross-region."""
+    private = os.getenv("DATABASE_URL", "").strip()
+    public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+    if not private and public:
+        return _normalize_database_url(public)
+    if private and "railway.internal" in private and public:
+        # Cross-region: private hostname is unreachable from another region.
+        return _normalize_database_url(public)
+    if private:
+        return _normalize_database_url(private)
+    return ""
+
+
 class Settings(BaseSettings):
     app_name: str = "AI Investment Analyst"
     app_env: str = "dev"
@@ -84,16 +98,24 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, v: Any) -> Any:
-        if v is None or (isinstance(v, str) and not str(v).strip()):
+        env_url = _resolve_database_url_from_env()
+        raw = v
+        if isinstance(raw, str) and raw.strip():
+            raw = raw.strip()
+        elif env_url:
+            raw = env_url
+        else:
+            raw = ""
+
+        if not raw:
             if _is_cloud_host():
                 raise ValueError(
-                    "DATABASE_URL is not set. On Railway: add a PostgreSQL service, then on your "
-                    "web service set DATABASE_URL=${{Postgres.DATABASE_URL}} (match your Postgres service name)."
+                    "DATABASE_URL is not set. On Railway: add PostgreSQL (same region as web service), "
+                    "then Variables → DATABASE_URL=${{Postgres.DATABASE_URL}}. "
+                    "If regions differ, also add DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}}."
                 )
             return "sqlite:///./investment_analyst.db"
-        if isinstance(v, str):
-            return _normalize_database_url(v.strip())
-        return v
+        return _normalize_database_url(str(raw))
 
     @model_validator(mode="after")
     def require_postgres_on_cloud(self) -> "Settings":

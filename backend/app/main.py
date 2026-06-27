@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.auth_session import cookie_secure, create_session_token, verify_session_token
 
 from app.config import settings
-from app.db import Base, SessionLocal, engine, get_db, init_db
+from app.db import Base, SessionLocal, db_init_error, db_is_ready, engine, get_db, init_db
 from app.ingestion.ir_fetcher import fetch_ir_filing_fallback_urls
 from app.ingestion.sec_filings import (
     apply_sec_metadata_to_company,
@@ -239,7 +239,7 @@ def _is_auth_path(path: str) -> bool:
     if path in open_paths:
         return True
     # Liveness / quote diagnostics (no secrets; helps verify Railway env keys and outbound HTTP).
-    if path.startswith("/health"):
+    if path.startswith("/health") or path == "/setup":
         return True
     if path.startswith("/docs") or path.startswith("/openapi") or path.startswith("/redoc"):
         return False
@@ -269,7 +269,10 @@ async def auth_middleware(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup():
-    init_db()
+    if not init_db():
+        logger.error("Starting without database — /health/diagnostics and /setup will show the error.")
+        return
+
     db = SessionLocal()
     try:
         db.query(Recommendation).filter(Recommendation.status == "blocked").update(
@@ -316,8 +319,9 @@ def on_shutdown():
 def root():
     """
     Never return JSON here — browsers opening the bare service URL should land in the UI.
-    (302 + HTML fallback for odd clients.) API health: GET /health/freshness
     """
+    if not db_is_ready():
+        return RedirectResponse(url="/setup", status_code=302)
     return HTMLResponse(
         """<!DOCTYPE html>
 <html lang="en">
@@ -923,36 +927,96 @@ def api_valuation_standalone(ticker: str, response: Response, db: Session = Depe
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok" if db_is_ready() else "degraded",
+        "database_ready": db_is_ready(),
+    }
+
+
+def _mask_database_url(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(url.replace("+psycopg2", ""))
+        host = p.hostname or "unknown"
+        return f"{p.scheme}://***@{host}:{p.port or 5432}{p.path or ''}"
+    except Exception:
+        return "unparseable"
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page():
+    """Human-readable deploy status (no login). Open this when the app won't load."""
+    db_ok = db_is_ready()
+    err = db_init_error() or ""
+    app_dir = Path(__file__).resolve().parent
+    checks = [
+        ("Database connected", db_ok),
+        ("meridian_dashboard.html", (app_dir / "meridian_dashboard.html").is_file()),
+        ("universe JSON", (app_dir.parent / "data" / "meridian_candidate_universe.json").is_file()),
+    ]
+    rows = "".join(
+        f'<li style="color:{"#2ECC71" if ok else "#E74C3C"}">{"✓" if ok else "✗"} {label}</li>'
+        for label, ok in checks
+    )
+    return HTMLResponse(
+        f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>MERIDIAN Setup</title>
+        <style>body{{background:#07090D;color:#F2EDE4;font-family:system-ui,sans-serif;padding:40px;max-width:720px;margin:0 auto}}
+        h1{{color:#C9A84C}} code{{background:#0C1118;padding:2px 6px;border-radius:4px}}
+        .err{{color:#E74C3C;font-size:14px;margin:12px 0;padding:12px;background:#1a0a0a;border-radius:8px}}</style></head>
+        <body><h1>MERIDIAN — Deploy Status</h1>
+        <ul>{rows}</ul>
+        {"<div class='err'><strong>Database error:</strong> " + err.replace("<", "&lt;") + "</div>" if err else ""}
+        <p><strong>Database host:</strong> <code>{_mask_database_url(settings.database_url)}</code></p>
+        <p><strong>Auth enabled:</strong> {settings.auth_enabled}</p>
+        <h3>Railway checklist</h3>
+        <ol>
+          <li>Postgres + web service in the <strong>same region</strong></li>
+          <li>Root Directory = <strong>empty</strong> (or backend with backend/Dockerfile)</li>
+          <li>Builder = <strong>Dockerfile</strong> (not Railpack)</li>
+          <li><code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code></li>
+          <li>If cross-region: <code>DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}}</code></li>
+        </ol>
+        <p><a href="/health/diagnostics" style="color:#C9A84C">JSON diagnostics</a> ·
+        <a href="/login" style="color:#C9A84C">Login</a> ·
+        <a href="/dashboard" style="color:#C9A84C">Dashboard</a></p>
+        </body></html>"""
+    )
 
 
 @app.get("/health/diagnostics")
-def health_diagnostics(db: Session = Depends(get_db)):
+def health_diagnostics():
     """Public diagnostics for Railway deploy troubleshooting (no secrets)."""
     app_dir = Path(__file__).resolve().parent
     html_files = ["meridian_dashboard.html", "opportunities_page.html", "portfolio_page.html"]
     files = {name: (app_dir / name).is_file() for name in html_files}
     universe = (app_dir.parent / "data" / "meridian_candidate_universe.json").is_file()
-    db_ok = False
-    db_error = None
+    db_ok = db_is_ready()
+    db_error = db_init_error()
     db_url_hint = "postgresql" if settings.database_url.startswith("postgresql") else "sqlite"
-    try:
-        db.execute(text("SELECT 1"))
-        db_ok = True
-    except Exception as exc:
-        db_error = str(exc)
+    uses_internal = "railway.internal" in settings.database_url
+    has_public_env = bool(__import__("os").getenv("DATABASE_PUBLIC_URL"))
     return {
-        "status": "ok",
+        "status": "ok" if db_ok else "degraded",
+        "database_ready": db_ok,
         "auth_enabled": settings.auth_enabled,
         "auth_username": settings.auth_username,
         "cookie_secure": cookie_secure(),
         "database_ok": db_ok,
         "database_error": db_error,
         "database_type": db_url_hint,
+        "database_host": _mask_database_url(settings.database_url),
+        "uses_railway_internal_host": uses_internal,
+        "has_database_public_url_env": has_public_env,
         "database_setup_hint": (
             None
             if db_ok
-            else "Railway: add PostgreSQL → web service Variables → DATABASE_URL=${{Postgres.DATABASE_URL}}"
+            else (
+                "Cross-region? Add DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}} "
+                "OR move web service to same region as Postgres."
+                if uses_internal and not has_public_env
+                else "Railway: Postgres same region → DATABASE_URL=${{Postgres.DATABASE_URL}}"
+            )
         ),
         "html_files": files,
         "universe_json": universe,
@@ -961,9 +1025,15 @@ def health_diagnostics(db: Session = Depends(get_db)):
 
 
 @app.get("/health/ready")
-def health_ready(db: Session = Depends(get_db)):
+def health_ready():
+    if not db_is_ready():
+        return JSONResponse(
+            {"status": "degraded", "database": db_init_error() or "not connected"},
+            status_code=503,
+        )
     try:
-        db.execute(text("SELECT 1"))
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
         return {"status": "ok", "database": "connected"}
     except Exception as exc:
         return JSONResponse(

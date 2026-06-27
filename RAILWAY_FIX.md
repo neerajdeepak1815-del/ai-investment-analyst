@@ -64,13 +64,20 @@ Also set:
 - `AUTH_PASSWORD` = your password
 - `FINNHUB_API_KEY` = *(recommended)*
 
+**Cross-region fallback** (if you cannot move regions yet):
+```
+DATABASE_PUBLIC_URL = ${{Postgres.DATABASE_PUBLIC_URL}}
+```
+The app auto-uses public URL when private `railway.internal` is unreachable.
+
 ---
 
 ## 5. Verify after redeploy
 
+Open **`/setup`** first — human-readable checklist with exact error.
+
 ```
-GET https://<your-app>.up.railway.app/health
-GET https://<your-app>.up.railway.app/health/ready
+GET https://<your-app>.up.railway.app/setup
 GET https://<your-app>.up.railway.app/health/diagnostics
 ```
 
