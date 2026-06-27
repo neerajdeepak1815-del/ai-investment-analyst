@@ -1,7 +1,13 @@
 from typing import Any
 
-from pydantic import AliasChoices, Field, field_validator
+import os
+
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _is_cloud_host() -> bool:
+    return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RENDER"))
 
 
 def _normalize_database_url(url: str) -> str:
@@ -78,9 +84,25 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            if _is_cloud_host():
+                raise ValueError(
+                    "DATABASE_URL is not set. On Railway: add a PostgreSQL service, then on your "
+                    "web service set DATABASE_URL=${{Postgres.DATABASE_URL}} (match your Postgres service name)."
+                )
+            return "sqlite:///./investment_analyst.db"
         if isinstance(v, str):
-            return _normalize_database_url(v)
+            return _normalize_database_url(v.strip())
         return v
+
+    @model_validator(mode="after")
+    def require_postgres_on_cloud(self) -> "Settings":
+        if _is_cloud_host() and self.database_url.startswith("sqlite"):
+            raise ValueError(
+                "DATABASE_URL must use PostgreSQL on Railway/Render (SQLite is local-dev only). "
+                "Add PostgreSQL to the project and reference it: DATABASE_URL=${{Postgres.DATABASE_URL}}"
+            )
+        return self
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

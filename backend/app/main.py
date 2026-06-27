@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.auth_session import cookie_secure, create_session_token, verify_session_token
 
 from app.config import settings
-from app.db import Base, SessionLocal, engine, get_db
+from app.db import Base, SessionLocal, engine, get_db, init_db
 from app.ingestion.ir_fetcher import fetch_ir_filing_fallback_urls
 from app.ingestion.sec_filings import (
     apply_sec_metadata_to_company,
@@ -50,7 +50,6 @@ from app.universe import get_candidate_companies, get_candidate_tickers, resolve
 
 app = FastAPI(title="AI Investment Analyst API", version="0.1.0")
 logger = logging.getLogger(__name__)
-Base.metadata.create_all(bind=engine)
 
 _dashboard_html_cache: Optional[str] = None
 _dashboard_html_mtime: Optional[float] = None
@@ -270,6 +269,7 @@ async def auth_middleware(request: Request, call_next):
 
 @app.on_event("startup")
 def on_startup():
+    init_db()
     db = SessionLocal()
     try:
         db.query(Recommendation).filter(Recommendation.status == "blocked").update(
@@ -935,6 +935,7 @@ def health_diagnostics(db: Session = Depends(get_db)):
     universe = (app_dir.parent / "data" / "meridian_candidate_universe.json").is_file()
     db_ok = False
     db_error = None
+    db_url_hint = "postgresql" if settings.database_url.startswith("postgresql") else "sqlite"
     try:
         db.execute(text("SELECT 1"))
         db_ok = True
@@ -947,6 +948,12 @@ def health_diagnostics(db: Session = Depends(get_db)):
         "cookie_secure": cookie_secure(),
         "database_ok": db_ok,
         "database_error": db_error,
+        "database_type": db_url_hint,
+        "database_setup_hint": (
+            None
+            if db_ok
+            else "Railway: add PostgreSQL → web service Variables → DATABASE_URL=${{Postgres.DATABASE_URL}}"
+        ),
         "html_files": files,
         "universe_json": universe,
         "railway": bool(__import__("os").getenv("RAILWAY_ENVIRONMENT")),
