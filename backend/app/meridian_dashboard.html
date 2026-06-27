@@ -2813,7 +2813,7 @@ async function runValuationSearch(e) {
   mount.innerHTML =
     '<p class="body-prose" style="padding:16px 0">Loading valuation for <span class="font-mono">' + esc(t) + "</span>…</p>";
   try {
-    const r = await fetch("/api/valuation/" + encodeURIComponent(t), { cache: "no-store" });
+    const r = await fetch("/api/valuation/" + encodeURIComponent(t), { cache: "no-store", credentials: "same-origin" });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       const msg = j.detail ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : r.statusText;
@@ -2977,7 +2977,7 @@ async function runSecIngest(evt) {
   setStatusRunning(true);
   setStatusMsg("Loading SEC filings and metrics for " + ticker + "…");
   try {
-    const res = await fetch("/sec/ingest/" + encodeURIComponent(ticker), { method: "POST", cache: "no-store" });
+    const res = await fetch("/sec/ingest/" + encodeURIComponent(ticker), { method: "POST", cache: "no-store", credentials: "same-origin" });
     const data = await res.json();
     if (!res.ok) {
       setStatusMsg((data && (data.detail || data.message)) || "Request failed");
@@ -2998,7 +2998,7 @@ async function runSecIngest(evt) {
 async function runFull() {
   setStatusRunning(true);
   setStatusMsg("Running full pipeline");
-  const res = await fetch("/run/full?scope=candidates", { method: "POST", cache: "no-store" });
+  const res = await fetch("/run/full?scope=candidates", { method: "POST", cache: "no-store", credentials: "same-origin" });
   const data = await res.json();
   let line = data.message || "Done";
   if (data.failures && data.failures.length) {
@@ -3077,8 +3077,8 @@ async function loadRecs() {
   let data = [];
   try {
     const [lbRes, alertsRes] = await Promise.all([
-      fetch("/recommendations/leaderboard?limit=10", { cache: "no-store" }),
-      fetch("/alerts/critical?limit=15", { cache: "no-store" }),
+      fetch("/recommendations/leaderboard?limit=10", { cache: "no-store", credentials: "same-origin" }),
+      fetch("/alerts/critical?limit=15", { cache: "no-store", credentials: "same-origin" }),
     ]);
 
     const alertsRaw = await alertsRes.json().catch(() => []);
@@ -3112,7 +3112,7 @@ async function loadRecs() {
   const detailed = await Promise.all(
     data.map(async (r) => {
       try {
-        const dr = await fetch("/recommendations/" + encodeURIComponent(r.ticker), { cache: "no-store" });
+        const dr = await fetch("/recommendations/" + encodeURIComponent(r.ticker), { cache: "no-store", credentials: "same-origin" });
         const detail = await dr.json().catch(() => ({}));
         if (!dr.ok) {
           const msg =

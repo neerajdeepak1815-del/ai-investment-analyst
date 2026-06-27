@@ -446,7 +446,7 @@
     async function loadPortfolio() {
       document.getElementById("tableStatus").textContent = "";
       try {
-        const res = await fetch("/api/portfolio");
+        const res = await fetch("/api/portfolio", { credentials: "same-origin" });
         if (!res.ok) throw new Error("Failed to load");
         const data = await res.json();
         renderSummary(data.summary || {});
@@ -472,6 +472,7 @@
       try {
         const res = await fetch("/api/portfolio", {
           method: "POST",
+          credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
@@ -502,7 +503,10 @@
       const id = btn.getAttribute("data-del");
       if (!id || !confirm("Remove this position?")) return;
       try {
-        const res = await fetch("/api/portfolio/" + encodeURIComponent(id), { method: "DELETE" });
+        const res = await fetch("/api/portfolio/" + encodeURIComponent(id), {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           document.getElementById("tableStatus").textContent = "Remove failed.";

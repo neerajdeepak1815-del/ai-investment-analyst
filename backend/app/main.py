@@ -1,14 +1,17 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 import re
-import secrets
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import and_, func
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import and_, func, text
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.auth_session import cookie_secure, create_session_token, verify_session_token
 
 from app.config import settings
 from app.db import Base, SessionLocal, engine, get_db
@@ -47,8 +50,21 @@ from app.tasks.scheduler import execute_full_pipeline, run_periodic_jobs, start_
 from app.universe import get_candidate_companies, get_candidate_tickers, resolve_sector_for_display
 
 app = FastAPI(title="AI Investment Analyst API", version="0.1.0")
+logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
-_active_sessions: set[str] = set()
+
+
+class _ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """Trust Railway/Render reverse proxy for scheme/host (HTTPS cookies & redirects)."""
+
+    async def dispatch(self, request: Request, call_next):
+        forwarded = request.headers.get("x-forwarded-proto")
+        if forwarded:
+            request.scope["scheme"] = forwarded.split(",")[0].strip()
+        return await call_next(request)
+
+
+app.add_middleware(_ProxyHeadersMiddleware)
 _dashboard_html_cache: Optional[str] = None
 _dashboard_html_mtime: Optional[float] = None
 _portfolio_html_cache: Optional[str] = None
@@ -254,7 +270,7 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     token = request.cookies.get(settings.auth_session_cookie, "")
-    if token in _active_sessions:
+    if verify_session_token(token):
         return await call_next(request)
 
     # Browser HTML routes redirect; API routes must return 401 JSON (never 303), or fetch() follows
@@ -387,15 +403,14 @@ def login_page():
 def login(username: str = Form(...), password: str = Form(...)):
     if username != settings.auth_username or password != settings.auth_password:
         return HTMLResponse("<h3>Invalid credentials. Go back and try again.</h3>", status_code=401)
-    token = secrets.token_urlsafe(24)
-    _active_sessions.add(token)
+    token = create_session_token(username)
     response = RedirectResponse(url="/dashboard", status_code=303)
     response.set_cookie(
         settings.auth_session_cookie,
         token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=cookie_secure(),
         max_age=60 * 60 * 24,
     )
     return response
@@ -403,9 +418,6 @@ def login(username: str = Form(...), password: str = Form(...)):
 
 @app.get("/logout")
 def logout(request: Request):
-    token = request.cookies.get(settings.auth_session_cookie, "")
-    if token in _active_sessions:
-        _active_sessions.remove(token)
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(settings.auth_session_cookie)
     return response
@@ -926,6 +938,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/health/ready")
+def health_ready(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as exc:
+        return JSONResponse(
+            {"status": "degraded", "database": str(exc)},
+            status_code=503,
+        )
+
+
 @app.get("/health/freshness")
 def health_freshness():
     return {"status": "ok", "schedules": run_periodic_jobs()}
@@ -1031,15 +1055,18 @@ def portfolio_impact(db: Session = Depends(get_db)):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)):
-    last_run = db.query(Recommendation).order_by(Recommendation.as_of.desc()).first()
-    if last_run and last_run.as_of:
-        dt = last_run.as_of
-        try:
-            last_run_display = f"{dt.strftime('%B')} {dt.day}, {dt.year}"
-        except Exception:
-            last_run_display = str(last_run.as_of)
-    else:
-        last_run_display = "Never"
+    last_run_display = "Never"
+    try:
+        last_run = db.query(Recommendation).order_by(Recommendation.as_of.desc()).first()
+        if last_run and last_run.as_of:
+            dt = last_run.as_of
+            try:
+                last_run_display = f"{dt.strftime('%B')} {dt.day}, {dt.year}"
+            except Exception:
+                last_run_display = str(last_run.as_of)
+    except Exception as exc:
+        logger.warning("dashboard last_run query failed: %s", exc)
+        last_run_display = "Database unavailable"
     html = _load_dashboard_html(last_run_display)
     return HTMLResponse(
         content=html,

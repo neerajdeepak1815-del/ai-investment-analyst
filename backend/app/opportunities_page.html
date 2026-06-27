@@ -318,7 +318,7 @@ async function scanMomentum() {
   el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning 50 stocks for momentum signals… this may take 1–2 minutes on first load.</p>';
   showPanel("momentum");
   try {
-    const res = await fetch("/api/opportunities/momentum", { cache: "no-store" });
+    const res = await fetch("/api/opportunities/momentum", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const payload = await res.json();
     const { items: data, meta } = unwrapItems(payload);
@@ -377,7 +377,7 @@ async function scanEarnings() {
   el.innerHTML = '<p class="loading"><span class="spinner"></span>Scanning upcoming earnings via Yahoo Finance… this may take 1–2 minutes.</p>';
   showPanel("earnings");
   try {
-    const res = await fetch("/api/opportunities/earnings", { cache: "no-store" });
+    const res = await fetch("/api/opportunities/earnings", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const payload = await res.json();
     const { items: data, meta } = unwrapItems(payload);
@@ -434,7 +434,7 @@ async function scanRegime() {
   el.innerHTML = '<p class="loading"><span class="spinner"></span>Analyzing market regime… this takes 30-60 seconds.</p>';
   showPanel("regime");
   try {
-    const res = await fetch("/api/opportunities/regime", { cache: "no-store" });
+    const res = await fetch("/api/opportunities/regime", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
     const meta = d.meta || {};
