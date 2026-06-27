@@ -13,7 +13,18 @@ from sqlalchemy.orm import Session
 from app.auth_session import cookie_secure, create_session_token, verify_session_token
 
 from app.config import settings
-from app.db import Base, SessionLocal, db_init_error, db_is_ready, engine, get_db, init_db
+from app.db import (
+    Base,
+    SessionLocal,
+    db_env_summary,
+    db_init_error,
+    db_is_ready,
+    db_last_host,
+    db_urls_tried,
+    engine,
+    get_db,
+    init_db,
+)
 from app.ingestion.ir_fetcher import fetch_ir_filing_fallback_urls
 from app.ingestion.sec_filings import (
     apply_sec_metadata_to_company,
@@ -949,6 +960,7 @@ def setup_page():
     """Human-readable deploy status (no login). Open this when the app won't load."""
     db_ok = db_is_ready()
     err = db_init_error() or ""
+    env = db_env_summary()
     app_dir = Path(__file__).resolve().parent
     checks = [
         ("Database connected", db_ok),
@@ -959,23 +971,51 @@ def setup_page():
         f'<li style="color:{"#2ECC71" if ok else "#E74C3C"}">{"✓" if ok else "✗"} {label}</li>'
         for label, ok in checks
     )
+    env_rows = "".join(
+        f"<li><code>{k}</code>: {v}</li>"
+        for k, v in env.items()
+    )
+    tried = db_urls_tried()
+    tried_html = (
+        "<ul>" + "".join(f"<li><code>{u}</code></li>" for u in tried) + "</ul>"
+        if tried
+        else "<p><em>none yet</em></p>"
+    )
+    wrong_public = env.get("database_url_uses_public_proxy")
+    public_warn = (
+        "<div class='err'><strong>Misconfigured:</strong> "
+        "<code>DATABASE_URL</code> points at the public proxy (<code>*.rlwy.net</code>). "
+        "Change it to <code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code> (private host "
+        "<code>postgres.railway.internal</code>).</div>"
+        if wrong_public and not db_ok
+        else ""
+    )
     return HTMLResponse(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>MERIDIAN Setup</title>
         <style>body{{background:#07090D;color:#F2EDE4;font-family:system-ui,sans-serif;padding:40px;max-width:720px;margin:0 auto}}
         h1{{color:#C9A84C}} code{{background:#0C1118;padding:2px 6px;border-radius:4px}}
-        .err{{color:#E74C3C;font-size:14px;margin:12px 0;padding:12px;background:#1a0a0a;border-radius:8px}}</style></head>
+        .err{{color:#E74C3C;font-size:14px;margin:12px 0;padding:12px;background:#1a0a0a;border-radius:8px}}
+        .warn{{color:#F39C12;font-size:14px;margin:12px 0;padding:12px;background:#1a1508;border-radius:8px}}</style></head>
         <body><h1>MERIDIAN — Deploy Status</h1>
         <ul>{rows}</ul>
+        {public_warn}
         {"<div class='err'><strong>Database error:</strong> " + err.replace("<", "&lt;") + "</div>" if err else ""}
-        <p><strong>Database host:</strong> <code>{_mask_database_url(settings.database_url)}</code></p>
+        <p><strong>Resolved DB host:</strong> <code>{env.get("resolved_settings_host", "?")}</code></p>
+        <p><strong>Last connect host:</strong> <code>{db_last_host() or "—"}</code></p>
+        <h3>Env (masked)</h3><ul>{env_rows}</ul>
+        <h3>URLs tried at startup</h3>{tried_html}
         <p><strong>Auth enabled:</strong> {settings.auth_enabled}</p>
-        <h3>Railway checklist</h3>
+        <h3>Fix on Railway</h3>
         <ol>
-          <li><strong>Best fix:</strong> Meridian + Postgres in the <strong>same region</strong> (EU West)</li>
-          <li>Use <code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code> (private — stable)</li>
-          <li>Remove <code>DATABASE_PUBLIC_URL</code> if same region (public proxy is flaky)</li>
-          <li>If public proxy fails: redeploy the <strong>Postgres</strong> service (Settings → Redeploy)</li>
-          <li>Root Directory = empty · Builder = Dockerfile</li>
+          <li><strong>Same region:</strong> Meridian web + Postgres both in <strong>EU West</strong> (Settings → Region on each service)</li>
+          <li><strong>Variables</strong> on web service only:
+            <ul>
+              <li><code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code></li>
+              <li>Delete <code>DATABASE_PUBLIC_URL</code> if present</li>
+            </ul>
+          </li>
+          <li><strong>Redeploy Postgres</strong> (Settings → Redeploy), wait until healthy</li>
+          <li><strong>Redeploy Meridian</strong> web service</li>
         </ol>
         <p><a href="/health/diagnostics" style="color:#C9A84C">JSON diagnostics</a> ·
         <a href="/login" style="color:#C9A84C">Login</a> ·
@@ -993,9 +1033,7 @@ def health_diagnostics():
     universe = (app_dir.parent / "data" / "meridian_candidate_universe.json").is_file()
     db_ok = db_is_ready()
     db_error = db_init_error()
-    db_url_hint = "postgresql" if settings.database_url.startswith("postgresql") else "sqlite"
-    uses_internal = "railway.internal" in settings.database_url
-    has_public_env = bool(__import__("os").getenv("DATABASE_PUBLIC_URL"))
+    env = db_env_summary()
     return {
         "status": "ok" if db_ok else "degraded",
         "database_ready": db_ok,
@@ -1004,18 +1042,22 @@ def health_diagnostics():
         "cookie_secure": cookie_secure(),
         "database_ok": db_ok,
         "database_error": db_error,
-        "database_type": db_url_hint,
+        "database_type": "postgresql" if settings.database_url.startswith("postgresql") else "sqlite",
         "database_host": _mask_database_url(settings.database_url),
-        "uses_railway_internal_host": uses_internal,
-        "has_database_public_url_env": has_public_env,
+        "database_last_host": db_last_host() or None,
+        "database_urls_tried": db_urls_tried(),
+        "database_env": env,
         "database_setup_hint": (
             None
             if db_ok
             else (
-                "Cross-region? Add DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}} "
-                "OR move web service to same region as Postgres."
-                if uses_internal and not has_public_env
-                else "Railway: Postgres same region → DATABASE_URL=${{Postgres.DATABASE_URL}}"
+                "DATABASE_URL uses public proxy (*.rlwy.net) — change to ${{Postgres.DATABASE_URL}} and same region."
+                if env.get("database_url_uses_public_proxy")
+                else (
+                    "Private railway.internal unreachable — move web service to same region as Postgres."
+                    if env.get("uses_railway_internal") and "rlwy.net" in (db_last_host() or "")
+                    else "Same region + DATABASE_URL=${{Postgres.DATABASE_URL}}; redeploy Postgres then Meridian."
+                )
             )
         ),
         "html_files": files,
