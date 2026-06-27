@@ -1,102 +1,72 @@
-# Railway setup — fix wrong service config
+# Railway setup — fix deploy & database
 
-Railway support flagged three issues. **Items 1–2 are UI settings** (cannot be set in `railway.toml` for root directory).
+**Symptom:** `/setup` shows *"Private Postgres (railway.internal) is unreachable"* or *hopper.proxy.rlwy.net connection closed*.
 
-## 1. Root Directory → empty (repo root) — RECOMMENDED
-
-**Web service → Settings → Source → Root Directory**
-
-| Wrong | Correct |
-|-------|---------|
-| `backend` | *(leave blank / empty)* |
-
-Why: Root `Dockerfile` copies `backend/` into the image. If Root Directory is `backend`, Railway can't find the root Dockerfile and may fall back to Railpack.
-
-**Fallback:** If you must keep Root Directory = `backend`, the repo now includes `backend/Dockerfile` + `backend/railway.toml` — still use Dockerfile builder, not Railpack.
+**Root cause:** Meridian web service and Postgres are in **different regions**. Private networking only works same-region. Public proxy is flaky cross-region.
 
 ---
 
-## 2. Builder → Dockerfile (not Railpack)
+## What Railway must fix (you cannot fix this in code)
 
-**Web service → Settings → Build → Builder**
-
-| Wrong | Correct |
-|-------|---------|
-| Railpack | **Dockerfile** |
-
-**Dockerfile path:** `Dockerfile` (relative to root directory above)
-
-Repo-root `railway.toml` and `railway.json` also set `builder = "DOCKERFILE"`. Redeploy after changing the UI — config-as-code overrides dashboard **on deploy**, but wrong Root Directory can prevent finding the file.
+| # | Setting | Correct value |
+|---|---------|---------------|
+| 1 | **Regions** | Postgres + Meridian web = **same region** (e.g. both EU West) |
+| 2 | **Root Directory** | **Empty** (repo root) — NOT `backend` |
+| 3 | **Builder** | **Dockerfile** — NOT Railpack |
+| 4 | **DATABASE_URL** | `${{Postgres.DATABASE_URL}}` on web service only |
+| 5 | **DATABASE_PUBLIC_URL** | **Delete** — do not use |
 
 ---
 
-## 3. Postgres and web service — SAME REGION
+## Step-by-step (Railway dashboard)
 
-**Problem:** Postgres in **EU West**, Meridian web service in **US East** → latency, connection issues, private networking may not work.
+### 1. Same region
+- Postgres → Settings → note **Region**
+- Meridian web → Settings → **Region** → match Postgres
+- If region cannot be changed: create **new web service** in Postgres's region, copy variables, delete old service
 
-**Fix (pick one):**
+### 2. Build settings (Meridian web)
+- Root Directory: *(blank)*
+- Builder: Dockerfile
+- Dockerfile path: `Dockerfile`
 
-### Option A — Move web service to EU West (easier)
-1. Web service → **Settings** → **Regions**
-2. Set region to **EU West** (same as Postgres)
-3. Redeploy
-
-### Option B — Recreate Postgres in US East
-1. Add new **PostgreSQL** in **US East**
-2. Update web service variable: `DATABASE_URL = ${{NewPostgresName.DATABASE_URL}}`
-3. Remove old EU Postgres when confirmed working
-
----
-
-## 4. Wire DATABASE_URL
-
-**Web service → Variables → New Variable → Add Reference**
-
+### 3. Variables (Meridian web only)
 ```
 DATABASE_URL = ${{Postgres.DATABASE_URL}}
+SEC_USER_AGENT = MERIDIAN/1.0 your-email@example.com
+AUTH_ENABLED = true
+AUTH_PASSWORD = your-password
+FINNHUB_API_KEY = your-key
 ```
 
-Use your actual Postgres service name if not `Postgres`.
+### 4. Redeploy
+1. Postgres → Redeploy → wait healthy
+2. Meridian web → Redeploy
 
-Also set:
-- `SEC_USER_AGENT` = `MERIDIAN/1.0 your-email@example.com`
-- `AUTH_ENABLED` = `true`
-- `AUTH_PASSWORD` = your password
-- `FINNHUB_API_KEY` = *(recommended)*
-
-**Cross-region fallback** (if you cannot move regions yet):
+### 5. Verify
 ```
-DATABASE_PUBLIC_URL = ${{Postgres.DATABASE_PUBLIC_URL}}
+https://<your-app>.up.railway.app/setup
+https://<your-app>.up.railway.app/health/diagnostics
 ```
-The app auto-uses public URL when private `railway.internal` is unreachable.
+Expect: Database connected ✓, host `postgres.railway.internal`, `"database_ok": true`
 
 ---
 
-## 5. Verify after redeploy
-
-Open **`/setup`** first — human-readable checklist with exact error.
-
-```
-GET https://<your-app>.up.railway.app/setup
-GET https://<your-app>.up.railway.app/health/diagnostics
-```
-
-Expect: `"database_ok": true`, `"database_type": "postgresql"`
-
-Then: `/login` → `/dashboard` → **Run Full Analysis**
+## Alternative: keep web in US, move Postgres
+1. Add PostgreSQL in **US East** (same as web)
+2. `DATABASE_URL = ${{NewPostgres.DATABASE_URL}}`
+3. Redeploy, verify `/setup`, remove old EU Postgres
 
 ---
 
-## Copy-paste for Railway agent
+## Message for Railway agent
 
-```
-Please fix my Meridian web service config:
+Full copy-paste message: **[RAILWAY_AGENT_MESSAGE.md](./RAILWAY_AGENT_MESSAGE.md)**
 
-1. Root Directory: CLEAR (empty = repo root). Currently wrongly set to "backend".
-2. Builder: Dockerfile (not Railpack). dockerfilePath = Dockerfile
-3. Postgres (EU West) and web service (US East) are in different regions — move web service to EU West OR recreate Postgres in US East, then wire DATABASE_URL reference.
-4. Confirm DATABASE_URL=${{Postgres.DATABASE_URL}} on web service.
-5. Redeploy and verify /health/diagnostics database_ok:true
+---
 
-Repo: neerajdeepak1815-del/ai-investment-analyst branch main
-```
+## Repo deploy config (already correct on `main`)
+
+- `Dockerfile` at repo root (Python 3.11, uvicorn)
+- `railway.toml` → `builder = "DOCKERFILE"`, healthcheck `/health`
+- Fallback: `backend/Dockerfile` if Root Directory stuck on `backend`

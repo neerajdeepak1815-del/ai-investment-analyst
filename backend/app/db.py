@@ -281,8 +281,8 @@ def get_db():
             detail={
                 "error": _db_init_error or "Database not connected",
                 "fix": (
-                    "Add DATABASE_PUBLIC_URL=${{Postgres.DATABASE_PUBLIC_URL}} on the web service, "
-                    "or move Meridian to the same region as Postgres."
+                    "Move Meridian web service to the same Railway region as Postgres, "
+                    "set DATABASE_URL=${{Postgres.DATABASE_URL}}, remove DATABASE_PUBLIC_URL, redeploy."
                 ),
             },
         )
