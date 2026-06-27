@@ -19,16 +19,37 @@ def _is_railway_private_url(url: str) -> bool:
     return "railway.internal" in (url or "").lower()
 
 
-def _connect_args_for(url: str) -> dict:
+def _host_hint(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(url.replace("+psycopg2", ""))
+        return p.hostname or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _is_external_postgres(url: str) -> bool:
+    """Neon, Supabase, Render DB, etc. — works from any Railway region."""
+    host = _host_hint(url).lower()
+    return bool(host) and host != "unknown" and not _is_railway_url(url)
+
+
+def _connect_args_for(url: str, sslmode_override: Optional[str] = None) -> dict:
     if url.startswith("sqlite"):
         return {"check_same_thread": False}
     if not url.startswith("postgresql"):
         return {}
 
-    args: dict = {"connect_timeout": 30}
+    args: dict = {"connect_timeout": 45}
     u = url.lower()
 
-    if _is_railway_private_url(url):
+    if sslmode_override:
+        args["sslmode"] = sslmode_override
+    elif _is_external_postgres(url):
+        if "sslmode=" not in url:
+            args["sslmode"] = "require"
+    elif _is_railway_private_url(url):
         # Railway private network — SSL not required (and can cause handshake drops).
         if "sslmode=" not in url:
             args["sslmode"] = "disable"
@@ -64,6 +85,10 @@ def _candidate_database_urls() -> list[str]:
             seen.add(u)
             out.append(u)
 
+    primary = settings.database_url
+    if primary.startswith("postgresql") and _is_external_postgres(primary):
+        return [primary]
+
     private_ref = os.getenv("DATABASE_PRIVATE_URL", "").strip()
     private = os.getenv("DATABASE_URL", "").strip()
     public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
@@ -82,15 +107,24 @@ def _candidate_database_urls() -> list[str]:
     return out
 
 
-def _make_engine(url: str):
+def _make_engine(url: str, sslmode_override: Optional[str] = None):
     return create_engine(
         url,
-        connect_args=_connect_args_for(url),
+        connect_args=_connect_args_for(url, sslmode_override=sslmode_override),
         pool_pre_ping=True,
         pool_recycle=300,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=3,
+        max_overflow=5,
     )
+
+
+def _ssl_modes_to_try(url: str) -> list[Optional[str]]:
+    u = url.lower()
+    if "rlwy.net" in u or "proxy.rlwy.net" in u:
+        return ["require", "prefer", "disable", None]
+    if _is_external_postgres(url):
+        return ["require", "prefer", None]
+    return [None]
 
 
 def _transient_db_error(exc: Exception) -> bool:
@@ -116,16 +150,6 @@ _db_initialized = False
 _db_init_error: Optional[str] = None
 _db_urls_tried: list[str] = []
 _db_last_host: str = ""
-
-
-def _host_hint(url: str) -> str:
-    try:
-        from urllib.parse import urlparse
-
-        p = urlparse(url.replace("+psycopg2", ""))
-        return p.hostname or "unknown"
-    except Exception:
-        return "unknown"
 
 
 def _mask_url(url: str) -> str:
@@ -201,41 +225,50 @@ def init_db() -> bool:
         for url in urls:
             host = _host_hint(url)
             _db_last_host = host
-            try:
-                eng = _make_engine(url)
-                with eng.connect() as conn:
-                    conn.execute(text("SELECT 1"))
-                Base.metadata.create_all(bind=eng)
-                engine = eng
-                SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-                _db_initialized = True
-                _db_init_error = None
-                if _is_railway_private_url(url):
-                    host_hint = "private"
-                elif "rlwy.net" in url:
-                    host_hint = "public-proxy"
-                else:
-                    host_hint = "direct"
-                logger.info("Database connected (%s, %s) and tables ready.", host_hint, host)
-                return True
-            except Exception as exc:
-                last_exc = exc
-                if _is_railway_private_url(url) and _dns_unreachable(exc):
-                    private_dns_failed = True
-                    logger.warning(
-                        "Private Postgres host unreachable (%s) — web service is likely in a different region than Postgres.",
+            for sslmode in _ssl_modes_to_try(url):
+                try:
+                    eng = _make_engine(url, sslmode_override=sslmode)
+                    with eng.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                    Base.metadata.create_all(bind=eng)
+                    engine = eng
+                    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+                    _db_initialized = True
+                    _db_init_error = None
+                    if _is_railway_private_url(url):
+                        host_hint = "private"
+                    elif "rlwy.net" in url:
+                        host_hint = "public-proxy"
+                    elif _is_external_postgres(url):
+                        host_hint = "external"
+                    else:
+                        host_hint = "direct"
+                    logger.info(
+                        "Database connected (%s, %s, sslmode=%s) and tables ready.",
+                        host_hint,
                         host,
+                        sslmode or "default",
                     )
-                    continue
-                if _transient_db_error(exc):
-                    logger.warning(
-                        "Database connect attempt %s failed (%s): %s",
-                        attempt + 1,
-                        host,
-                        exc,
-                    )
-                    continue
-                break
+                    return True
+                except Exception as exc:
+                    last_exc = exc
+                    if _is_railway_private_url(url) and _dns_unreachable(exc):
+                        private_dns_failed = True
+                        logger.warning(
+                            "Private Postgres host unreachable (%s) — web service is likely in a different region than Postgres.",
+                            host,
+                        )
+                        break
+                    if _transient_db_error(exc):
+                        logger.warning(
+                            "Database connect attempt %s failed (%s, sslmode=%s): %s",
+                            attempt + 1,
+                            host,
+                            sslmode or "default",
+                            exc,
+                        )
+                        continue
+                    break
         if attempt < 2:
             time.sleep(1.5 * (attempt + 1))
 
@@ -249,8 +282,10 @@ def init_db() -> bool:
     elif private_dns_failed:
         _db_init_error = (
             "Private Postgres (railway.internal) is unreachable — your web service and Postgres are in "
-            "different Railway regions. Move Meridian to the same region as Postgres, use "
-            "DATABASE_URL=${{Postgres.DATABASE_URL}}, remove DATABASE_PUBLIC_URL, and redeploy."
+            "different Railway regions. FASTEST FIX: use free Neon Postgres (see RAILWAY_QUICK_FIX.md) — "
+            "set DATABASE_URL to Neon connection string on the web service, redeploy. "
+            "OR move Meridian to the same region as Postgres, use DATABASE_URL=${{Postgres.DATABASE_URL}}, "
+            "remove DATABASE_PUBLIC_URL, and redeploy."
         )
     elif "rlwy.net" in (_db_last_host or ""):
         raw_url = os.getenv("DATABASE_URL", "")

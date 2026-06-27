@@ -990,6 +990,19 @@ def setup_page():
         if wrong_public and not db_ok
         else ""
     )
+    cross_region = (not db_ok) and ("railway.internal" in err.lower() or "different railway regions" in err.lower())
+    neon_fix = (
+        """<div class='warn'><strong>Fastest fix (5 min):</strong> Use free
+        <a href='https://neon.tech' style='color:#C9A84C'>Neon Postgres</a> instead of Railway Postgres.
+        <ol style='margin:8px 0 0 18px'>
+          <li>neon.tech → New project → copy connection string</li>
+          <li>Railway → Meridian web → Variables → paste as <code>DATABASE_URL</code></li>
+          <li>Delete <code>DATABASE_PUBLIC_URL</code> and <code>DATABASE_PRIVATE_URL</code></li>
+          <li>Redeploy</li>
+        </ol></div>"""
+        if cross_region
+        else ""
+    )
     return HTMLResponse(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>MERIDIAN Setup</title>
         <style>body{{background:#07090D;color:#F2EDE4;font-family:system-ui,sans-serif;padding:40px;max-width:720px;margin:0 auto}}
@@ -999,6 +1012,7 @@ def setup_page():
         <body><h1>MERIDIAN — Deploy Status</h1>
         <ul>{rows}</ul>
         {public_warn}
+        {neon_fix}
         {"<div class='err'><strong>Database error:</strong> " + err.replace("<", "&lt;") + "</div>" if err else ""}
         <p><strong>Resolved DB host:</strong> <code>{env.get("resolved_settings_host", "?")}</code></p>
         <p><strong>Last connect host:</strong> <code>{db_last_host() or "—"}</code></p>

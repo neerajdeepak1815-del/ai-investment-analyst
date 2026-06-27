@@ -1,8 +1,8 @@
 # Railway setup — fix deploy & database
 
-**Symptom:** `/setup` shows *"Private Postgres (railway.internal) is unreachable"* or *hopper.proxy.rlwy.net connection closed*.
+**Symptom:** `/setup` shows *"Private Postgres (railway.internal) is unreachable"*.
 
-**Root cause:** Meridian web service and Postgres are in **different regions**. Private networking only works same-region. Public proxy is flaky cross-region.
+**If Railway support hasn't fixed regions:** use **[RAILWAY_QUICK_FIX.md](./RAILWAY_QUICK_FIX.md)** — Neon Postgres in 5 minutes (recommended).
 
 ---
 
