@@ -9,6 +9,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _is_railway_url(url: str) -> bool:
+    u = (url or "").lower()
+    return "railway" in u or "rlwy.net" in u
+
+
 _connect_args: dict = {}
 _engine_kwargs: dict = {"pool_pre_ping": True}
 
@@ -29,11 +35,6 @@ Base = declarative_base()
 
 _db_initialized = False
 _db_init_error: Optional[str] = None
-
-
-def _is_railway_url(url: str) -> bool:
-    u = (url or "").lower()
-    return "railway" in u or "rlwy.net" in u
 
 
 def db_is_ready() -> bool:
