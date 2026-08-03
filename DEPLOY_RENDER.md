@@ -1,65 +1,61 @@
-# Deploy MERIDIAN on Render (least work)
+# Deploy MERIDIAN on Render
 
-## One click (recommended)
+## Fix for: `databases[0].plan` / legacy `starter` not supported
 
-1. Open this link (sign in with GitHub if asked):
+Old `render.yaml` used `plan: starter` for Postgres — Render no longer allows that for **new** databases.
 
-   **https://render.com/deploy?repo=https://github.com/neerajdeepak1815-del/ai-investment-analyst**
-
-2. Confirm repo / branch **`main`**, then click **Apply**.
-3. Wait 5–10 minutes for Docker build + Postgres.
-4. Open your service URL → `/setup` → Database should be green.
-5. Login: username **`admin`** / password **`MeridianStart99`**
-6. On the dashboard, click **Run Full Analysis** once.
-
-Done. That is all you must do.
-
-### After it works (2 minutes, optional but recommended)
-
-On **meridian-analyst** → **Environment**, change:
-
-| Variable | Change to |
-|----------|-----------|
-| `AUTH_PASSWORD` | Your own strong password |
-| `SEC_USER_AGENT` | `MERIDIAN/1.0 your-real-email@example.com` |
-| `FINNHUB_API_KEY` | Free key from [finnhub.io](https://finnhub.io/register) |
-
-Then **Manual Deploy** → Deploy latest.
-
-### Pause Railway
-
-When Render `/setup` is green, pause or delete the Railway web service so you are not billed twice.
+Fixed Blueprint on `main`:
+- **No Render Postgres** in the Blueprint
+- **Free web** service
+- You paste a free **Neon** connection string as `NEON_DATABASE_URL`
 
 ---
 
-## Manual path (if the deploy link fails)
+## What to do now
 
-1. [dashboard.render.com](https://dashboard.render.com) → **New +** → **Blueprint**
-2. Connect **`neerajdeepak1815-del/ai-investment-analyst`**, branch **`main`**
-3. **Apply** (defaults are already in `render.yaml` — no secrets required)
-4. Same verify steps as above
+### 1. Wait ~1 minute for GitHub `main` to update
+(after we push the fixed `render.yaml`)
 
-## Verify URLs
+### 2. Create free Neon DB
+1. https://neon.tech → New project `meridian`
+2. Copy connection string  
+   `postgresql://...@ep-xxx.neon.tech/neondb?sslmode=require`
 
-Replace with your real Render hostname:
+### 3. Re-run Blueprint on Render
+1. Cancel the failed Blueprint if needed
+2. **New +** → **Blueprint**
+3. Repo: `neerajdeepak1815-del/ai-investment-analyst`
+4. Branch: **`main`**
+5. Blueprint name: anything (e.g. `meridian`)
+6. When asked for **`NEON_DATABASE_URL`**, paste the Neon string
+7. **Apply**
 
-| URL | Expected |
-|-----|----------|
-| `/setup` | Database connected ✓ |
-| `/health/diagnostics` | `"database_ok": true` |
-| `/login` | `admin` / `MeridianStart99` |
-| `/dashboard` | UI loads |
+No Render Postgres → no legacy `starter` error. Free web may still ask you to verify account, but not for a paid DB plan.
 
-## Cost
+### 4. After deploy
+- Open `https://meridian-analyst.onrender.com/setup` (or your Render URL)
+- Login: `admin` / `MeridianStart99`
+- Run **Full Analysis**
 
-Blueprint uses **Starter** web + **Starter** Postgres (~$14/mo total). Always-on (no free-tier sleep).
+---
 
-## Troubleshooting
+## If you prefer paid Render Postgres instead
 
-**Can't see the repo** — In Render, reconnect GitHub and grant access to `neerajdeepak1815-del/ai-investment-analyst`.
+Change `render.yaml` databases to:
 
-**Build fails** — Open service → Logs. Should build from root `Dockerfile` (`FROM python:3.11-slim-bookworm`).
+```yaml
+databases:
+  - name: meridian-db
+    plan: basic-256mb
+```
 
-**Database red on `/setup`** — Wait until `meridian-db` shows Available, then Manual Deploy the web service.
+(`basic-256mb` is the current lowest paid plan — requires a card.)
 
-**Login fails** — Use `admin` / `MeridianStart99` (unless you already changed `AUTH_PASSWORD`).
+---
+
+## Login defaults
+
+| Field | Value |
+|-------|--------|
+| Username | `admin` |
+| Password | `MeridianStart99` |
