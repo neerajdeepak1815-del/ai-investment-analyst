@@ -20,12 +20,20 @@ def _normalize_database_url(url: str) -> str:
     return u
 
 
+def _is_railway_db_url(url: str) -> bool:
+    u = (url or "").lower()
+    return "railway.internal" in u or "rlwy.net" in u
+
+
 def _resolve_database_url_from_env() -> str:
-    """Prefer private Railway Postgres; init_db falls back to public if unreachable."""
+    """Resolve DB URL — external DATABASE_URL (Neon) wins over Railway private refs."""
     private_ref = os.getenv("DATABASE_PRIVATE_URL", "").strip()
     private = os.getenv("DATABASE_URL", "").strip()
     public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
 
+    # Neon/Supabase in DATABASE_URL must not be overridden by Railway DATABASE_PRIVATE_URL.
+    if private and not _is_railway_db_url(private):
+        return _normalize_database_url(private)
     if private_ref:
         return _normalize_database_url(private_ref)
     if private:

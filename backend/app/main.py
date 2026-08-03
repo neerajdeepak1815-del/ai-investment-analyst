@@ -982,12 +982,21 @@ def setup_page():
         else "<p><em>none yet</em></p>"
     )
     wrong_public = env.get("database_url_uses_public_proxy")
+    private_overrides = env.get("database_private_url_overrides_neon")
     public_warn = (
         "<div class='err'><strong>Misconfigured:</strong> "
         "<code>DATABASE_URL</code> points at the public proxy (<code>*.rlwy.net</code>). "
         "Change it to <code>DATABASE_URL=${{Postgres.DATABASE_URL}}</code> (private host "
         "<code>postgres.railway.internal</code>).</div>"
         if wrong_public and not db_ok
+        else ""
+    )
+    neon_override_warn = (
+        "<div class='err'><strong>Delete DATABASE_PRIVATE_URL:</strong> "
+        "You set Neon/external Postgres in <code>DATABASE_URL</code>, but "
+        "<code>DATABASE_PRIVATE_URL</code> is still set. "
+        "Remove <code>DATABASE_PRIVATE_URL</code> and <code>DATABASE_PUBLIC_URL</code>, then redeploy.</div>"
+        if private_overrides and not db_ok
         else ""
     )
     cross_region = (not db_ok) and ("railway.internal" in err.lower() or "different railway regions" in err.lower())
@@ -1012,6 +1021,7 @@ def setup_page():
         <body><h1>MERIDIAN — Deploy Status</h1>
         <ul>{rows}</ul>
         {public_warn}
+        {neon_override_warn}
         {neon_fix}
         {"<div class='err'><strong>Database error:</strong> " + err.replace("<", "&lt;") + "</div>" if err else ""}
         <p><strong>Resolved DB host:</strong> <code>{env.get("resolved_settings_host", "?")}</code></p>

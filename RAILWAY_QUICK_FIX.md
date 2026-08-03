@@ -16,7 +16,7 @@ External Postgres works from **any** Railway region. Free tier is enough to star
    Looks like: `postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require`
 4. Railway → **Meridian web service** → **Variables**:
    - **Replace** `DATABASE_URL` with the Neon connection string (paste full URL)
-   - **Delete** `DATABASE_PRIVATE_URL` if present
+   - **Delete** `DATABASE_PRIVATE_URL` ← **required** (Railway auto-adds this; it overrides Neon if left set)
    - **Delete** `DATABASE_PUBLIC_URL` if present
    - Keep: `SEC_USER_AGENT`, `AUTH_ENABLED`, `AUTH_PASSWORD`, `FINNHUB_API_KEY`
 5. **Redeploy** Meridian web service

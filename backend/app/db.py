@@ -93,6 +93,10 @@ def _candidate_database_urls() -> list[str]:
     private = os.getenv("DATABASE_URL", "").strip()
     public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
 
+    # Neon in DATABASE_URL — ignore leftover Railway refs.
+    if private and _is_external_postgres(_normalize_database_url(private)):
+        return [_normalize_database_url(private)]
+
     # Same-region Railway: private URL is reliable (no public proxy).
     if private_ref:
         add(private_ref)
@@ -176,12 +180,16 @@ def db_env_summary() -> dict:
     raw_url = os.getenv("DATABASE_URL", "").strip()
     raw_private = os.getenv("DATABASE_PRIVATE_URL", "").strip()
     raw_public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+    url_is_external = bool(raw_url) and _is_external_postgres(_normalize_database_url(raw_url))
+    private_ref_blocks_neon = url_is_external and bool(raw_private)
     return {
         "database_url_env_set": bool(raw_url),
         "database_url_env_host": _mask_url(_normalize_database_url(raw_url)) if raw_url else None,
         "database_url_uses_public_proxy": "rlwy.net" in raw_url.lower(),
+        "database_url_is_external": url_is_external,
         "database_private_url_env_set": bool(raw_private),
         "database_public_url_env_set": bool(raw_public),
+        "database_private_url_overrides_neon": private_ref_blocks_neon,
         "resolved_settings_host": _mask_url(settings.database_url),
         "uses_railway_internal": "railway.internal" in settings.database_url.lower(),
     }
