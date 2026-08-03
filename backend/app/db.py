@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from app.config import _normalize_database_url, settings
+from app.config import _normalize_database_url, _sanitize_db_url, settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,16 @@ def _candidate_database_urls() -> list[str]:
     if primary.startswith("postgresql") and _is_external_postgres(primary):
         return [primary]
 
-    private_ref = os.getenv("DATABASE_PRIVATE_URL", "").strip()
-    private = os.getenv("DATABASE_URL", "").strip()
-    public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+    neon = _sanitize_db_url(os.getenv("NEON_DATABASE_URL", ""))
+    external = _sanitize_db_url(os.getenv("EXTERNAL_DATABASE_URL", ""))
+    private_ref = _sanitize_db_url(os.getenv("DATABASE_PRIVATE_URL", ""))
+    private = _sanitize_db_url(os.getenv("DATABASE_URL", ""))
+    public = _sanitize_db_url(os.getenv("DATABASE_PUBLIC_URL", ""))
+
+    if neon:
+        return [_normalize_database_url(neon)]
+    if external:
+        return [_normalize_database_url(external)]
 
     # Neon in DATABASE_URL — ignore leftover Railway refs.
     if private and _is_external_postgres(_normalize_database_url(private)):
@@ -177,21 +184,48 @@ def db_last_host() -> str:
 
 def db_env_summary() -> dict:
     """Masked env hints for /setup — no credentials."""
-    raw_url = os.getenv("DATABASE_URL", "").strip()
-    raw_private = os.getenv("DATABASE_PRIVATE_URL", "").strip()
-    raw_public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+    neon = _sanitize_db_url(os.getenv("NEON_DATABASE_URL", ""))
+    external = _sanitize_db_url(os.getenv("EXTERNAL_DATABASE_URL", ""))
+    raw_url = _sanitize_db_url(os.getenv("DATABASE_URL", ""))
+    raw_private = _sanitize_db_url(os.getenv("DATABASE_PRIVATE_URL", ""))
+    raw_public = _sanitize_db_url(os.getenv("DATABASE_PUBLIC_URL", ""))
     url_is_external = bool(raw_url) and _is_external_postgres(_normalize_database_url(raw_url))
-    private_ref_blocks_neon = url_is_external and bool(raw_private)
+    active_source = (
+        "NEON_DATABASE_URL"
+        if neon
+        else (
+            "EXTERNAL_DATABASE_URL"
+            if external
+            else (
+                "DATABASE_URL (external)"
+                if url_is_external
+                else (
+                    "DATABASE_PRIVATE_URL"
+                    if raw_private
+                    else "DATABASE_URL" if raw_url else "none"
+                )
+            )
+        )
+    )
     return {
+        "active_database_source": active_source,
+        "neon_database_url_env_set": bool(neon),
+        "external_database_url_env_set": bool(external),
         "database_url_env_set": bool(raw_url),
         "database_url_env_host": _mask_url(_normalize_database_url(raw_url)) if raw_url else None,
         "database_url_uses_public_proxy": "rlwy.net" in raw_url.lower(),
         "database_url_is_external": url_is_external,
         "database_private_url_env_set": bool(raw_private),
         "database_public_url_env_set": bool(raw_public),
-        "database_private_url_overrides_neon": private_ref_blocks_neon,
+        "database_private_url_overrides_neon": url_is_external and bool(raw_private) and not neon,
         "resolved_settings_host": _mask_url(settings.database_url),
         "uses_railway_internal": "railway.internal" in settings.database_url.lower(),
+        "deploy_commit": (
+            os.getenv("RAILWAY_GIT_COMMIT_SHA")
+            or os.getenv("RENDER_GIT_COMMIT")
+            or os.getenv("GIT_COMMIT")
+            or "unknown"
+        ),
     }
 
 

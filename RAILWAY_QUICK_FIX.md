@@ -1,74 +1,62 @@
 # Railway database still broken? Fix in 5 minutes
 
-If `/setup` shows **railway.internal unreachable** (cross-region), Railway support may take days. Use one of these **proven workarounds**:
+If `/setup` shows **railway.internal unreachable**, Railway Postgres is in a different region than your web app. **Use Neon instead.**
 
 ---
 
-## Option A — Neon Postgres (fastest, keep Railway web)
+## Option A — Neon Postgres (recommended)
 
-External Postgres works from **any** Railway region. Free tier is enough to start.
+Railway **overwrites** `DATABASE_URL` when Postgres is linked. Use **`NEON_DATABASE_URL`** instead — Railway will not touch it.
 
 ### Steps
 
 1. Go to **[neon.tech](https://neon.tech)** → Sign up (free)
-2. **New Project** → name it `meridian` → pick a region close to you
-3. Dashboard → **Connection details** → copy the **connection string**  
-   Looks like: `postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require`
-4. Railway → **Meridian web service** → **Variables**:
-   - **Replace** `DATABASE_URL` with the Neon connection string (paste full URL)
-   - **Delete** `DATABASE_PRIVATE_URL` ← **required** (Railway auto-adds this; it overrides Neon if left set)
-   - **Delete** `DATABASE_PUBLIC_URL` if present
-   - Keep: `SEC_USER_AGENT`, `AUTH_ENABLED`, `AUTH_PASSWORD`, `FINNHUB_API_KEY`
+2. **New Project** → name it `meridian`
+3. **Connection details** → copy the **connection string**  
+   Example: `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`
+4. Railway → **Meridian web service** → **Variables** → **New variable**:
+   ```
+   NEON_DATABASE_URL = postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
+   ```
+   Paste your full Neon string. Do **not** wrap in extra quotes.
 5. **Redeploy** Meridian web service
-6. Open **`/setup`** → should show Database connected ✓, host `*.neon.tech`
+6. Open **`/setup`** and confirm:
+   - `active_database_source` = **NEON_DATABASE_URL**
+   - `resolved_settings_host` = **\*.neon.tech**
+   - Database connected ✓
 
-You can delete or ignore the old Railway Postgres service to save cost once Neon works.
-
----
-
-## Option B — Render (full move, ~$14/mo, most reliable)
-
-Web + Postgres in one blueprint, same network, no cross-region issues.
-
-1. Push `main` to GitHub (already done)
-2. [Render Dashboard](https://dashboard.render.com/) → **New +** → **Blueprint**
-3. Connect repo `neerajdeepak1815-del/ai-investment-analyst`
-4. Set secrets when prompted: `SEC_USER_AGENT`, `AUTH_PASSWORD`, `FINNHUB_API_KEY`
-5. **Apply** → wait ~5 min
-6. Open `https://<service>.onrender.com/setup`
-
-See **[DEPLOY_RENDER.md](./DEPLOY_RENDER.md)** for details.
+You can ignore Railway Postgres after this (delete it later to save cost).
 
 ---
 
-## Option C — Nuclear Railway reset (stay 100% on Railway)
+## Option B — Render (full move, ~$14/mo)
 
-If you want Railway-only and can delete/recreate services:
+Web + Postgres in one blueprint — no cross-region issues.
 
-1. Note Postgres **region** (e.g. EU West)
-2. **Delete** the current Meridian **web** service (not Postgres yet)
-3. **+ New** → **GitHub Repo** → same repo
-4. When creating, pick **same region as Postgres**
-5. Settings: Root Directory = **empty**, Builder = **Dockerfile**
-6. Variables:
-   ```
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   SEC_USER_AGENT=MERIDIAN/1.0 your@email.com
-   AUTH_ENABLED=true
-   AUTH_PASSWORD=your-password
-   FINNHUB_API_KEY=your-key
-   ```
-7. Generate domain → Redeploy Postgres → Redeploy web
-8. Verify `/setup`
+1. [Render Dashboard](https://dashboard.render.com/) → **New +** → **Blueprint**
+2. Connect repo `neerajdeepak1815-del/ai-investment-analyst`
+3. Set `SEC_USER_AGENT`, `AUTH_PASSWORD`, `FINNHUB_API_KEY`
+4. **Apply** → open `https://<service>.onrender.com/setup`
+
+See **[DEPLOY_RENDER.md](./DEPLOY_RENDER.md)**.
 
 ---
 
-## Which to pick?
+## Option C — Fix Railway regions (100% Railway)
 
-| Option | Time | Cost | Best when |
-|--------|------|------|-----------|
-| **A Neon** | 5 min | Free tier | Want app live today on Railway |
-| **B Render** | 15 min | ~$14/mo | Tired of Railway infra issues |
-| **C Nuclear** | 20 min | Railway pricing | Must stay on Railway, can recreate services |
+1. Move Meridian web + Postgres to **same region** (e.g. both EU West)
+2. `DATABASE_URL=${{Postgres.DATABASE_URL}}`
+3. Remove `DATABASE_PUBLIC_URL`, `NEON_DATABASE_URL`
+4. Redeploy both services
 
-**Recommended right now: Option A (Neon).**
+---
+
+## Troubleshooting `/setup`
+
+| Field | Good | Bad |
+|-------|------|-----|
+| `active_database_source` | `NEON_DATABASE_URL` | `DATABASE_PRIVATE_URL` |
+| `resolved_settings_host` | `*.neon.tech` | `postgres.railway.internal` |
+| `deploy_commit` | recent (starts with `24471` or newer) | old / unknown |
+
+If `active_database_source` is still `DATABASE_PRIVATE_URL`, you did not set `NEON_DATABASE_URL` or need to redeploy.

@@ -20,18 +20,31 @@ def _normalize_database_url(url: str) -> str:
     return u
 
 
+def _sanitize_db_url(url: str) -> str:
+    """Strip whitespace and surrounding quotes from pasted connection strings."""
+    u = (url or "").strip()
+    if len(u) >= 2 and u[0] == u[-1] and u[0] in "\"'":
+        u = u[1:-1].strip()
+    return u
+
+
 def _is_railway_db_url(url: str) -> bool:
     u = (url or "").lower()
     return "railway.internal" in u or "rlwy.net" in u
 
 
 def _resolve_database_url_from_env() -> str:
-    """Resolve DB URL — external DATABASE_URL (Neon) wins over Railway private refs."""
-    private_ref = os.getenv("DATABASE_PRIVATE_URL", "").strip()
-    private = os.getenv("DATABASE_URL", "").strip()
-    public = os.getenv("DATABASE_PUBLIC_URL", "").strip()
+    """Resolve DB URL — NEON_DATABASE_URL wins (Railway cannot overwrite it)."""
+    neon = _sanitize_db_url(os.getenv("NEON_DATABASE_URL", ""))
+    external = _sanitize_db_url(os.getenv("EXTERNAL_DATABASE_URL", ""))
+    private_ref = _sanitize_db_url(os.getenv("DATABASE_PRIVATE_URL", ""))
+    private = _sanitize_db_url(os.getenv("DATABASE_URL", ""))
+    public = _sanitize_db_url(os.getenv("DATABASE_PUBLIC_URL", ""))
 
-    # Neon/Supabase in DATABASE_URL must not be overridden by Railway DATABASE_PRIVATE_URL.
+    if neon:
+        return _normalize_database_url(neon)
+    if external:
+        return _normalize_database_url(external)
     if private and not _is_railway_db_url(private):
         return _normalize_database_url(private)
     if private_ref:

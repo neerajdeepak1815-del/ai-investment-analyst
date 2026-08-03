@@ -999,19 +999,23 @@ def setup_page():
         if private_overrides and not db_ok
         else ""
     )
-    cross_region = (not db_ok) and ("railway.internal" in err.lower() or "different railway regions" in err.lower())
+    cross_region = (not db_ok) and (
+        "railway.internal" in err.lower()
+        or "different railway regions" in err.lower()
+        or env.get("uses_railway_internal")
+    )
     neon_fix = (
-        """<div class='warn'><strong>Fastest fix (5 min):</strong> Use free
-        <a href='https://neon.tech' style='color:#C9A84C'>Neon Postgres</a> instead of Railway Postgres.
+        """<div class='warn'><strong>Fastest fix — use Neon (Railway cannot overwrite this var):</strong>
         <ol style='margin:8px 0 0 18px'>
-          <li>neon.tech → New project → copy connection string</li>
-          <li>Railway → Meridian web → Variables → paste as <code>DATABASE_URL</code></li>
-          <li>Delete <code>DATABASE_PUBLIC_URL</code> and <code>DATABASE_PRIVATE_URL</code></li>
-          <li>Redeploy</li>
+          <li><a href='https://neon.tech' style='color:#C9A84C'>neon.tech</a> → New project → copy connection string</li>
+          <li>Railway → Meridian web → Variables → add <code>NEON_DATABASE_URL</code> = paste Neon URL</li>
+          <li>Leave <code>DATABASE_URL</code> alone (Railway overwrites it) — Neon uses its own var</li>
+          <li>Redeploy → refresh this page — <code>active_database_source</code> should be <code>NEON_DATABASE_URL</code></li>
         </ol></div>"""
-        if cross_region
+        if (cross_region or not db_ok)
         else ""
     )
+    deploy_commit = env.get("deploy_commit", "unknown")
     return HTMLResponse(
         f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>MERIDIAN Setup</title>
         <style>body{{background:#07090D;color:#F2EDE4;font-family:system-ui,sans-serif;padding:40px;max-width:720px;margin:0 auto}}
@@ -1024,6 +1028,9 @@ def setup_page():
         {neon_override_warn}
         {neon_fix}
         {"<div class='err'><strong>Database error:</strong> " + err.replace("<", "&lt;") + "</div>" if err else ""}
+        <p><strong>Deploy commit:</strong> <code>{deploy_commit[:12] if deploy_commit != "unknown" else "unknown"}</code>
+        (need recent deploy for Neon fix)</p>
+        <p><strong>Active DB source:</strong> <code>{env.get("active_database_source", "?")}</code></p>
         <p><strong>Resolved DB host:</strong> <code>{env.get("resolved_settings_host", "?")}</code></p>
         <p><strong>Last connect host:</strong> <code>{db_last_host() or "—"}</code></p>
         <h3>Env (masked)</h3><ul>{env_rows}</ul>
